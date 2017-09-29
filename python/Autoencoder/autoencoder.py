@@ -21,24 +21,28 @@ label = cv2.cvtColor(label, cv2.COLOR_RGB2GRAY)
 
 image_width = 320
 image_height = 480
-half_block = 16
+half_block = 32
 pixel_depth = 255.0
 
 num_block = 0
-for x in range(0, image_width - half_block, 4):
-    if num_block >= 21:
+block = list()
+block_gt = list()
+for x in range(0, image_width - half_block, 1):
+    if num_block >= 30:
         break   
-    for y in range(0, image_height - half_block, 4):
+    for y in range(0, image_height - half_block, 1):
         if label[x, y] != 0 and x - half_block > 0 and y - half_block > 0:
-            if num_block == 20:
-                block = img_gray[x-half_block:x+half_block, y-half_block:y+half_block]
-                block_gt = label[x-half_block:x+half_block, y-half_block:y+half_block]
+            if num_block < 30:
+                block.append(img_gray[x-half_block:x+half_block, y-half_block:y+half_block])
+                block_gt.append(label[x-half_block:x+half_block, y-half_block:y+half_block])
                 num_block += 1
                 break
-            else:
-                num_block += 1
-display(Image.fromarray(block.astype(np.uint8)))
+            
+#display(Image.fromarray(block.astype(np.uint8)))
+block = np.array(block)
+block_gt = np.array(block_gt)
 block = (block - pixel_depth) / pixel_depth
+block_gt = block_gt / pixel_depth
 
 # In[2]:Autoencoder
 #Xaiver初始化器，作用是权重初始化，满足均值0和方差2/(in+out)，这里创建的是标准的均匀分布
@@ -56,10 +60,11 @@ class Autoencoder(object):
         self.weights = network_weights
         
         self.x = tf.placeholder(tf.float32, [None, self.n_input])
+        self.y = tf.placeholder(tf.float32, [None, self.n_input])
         self.hidden = self.transfer(tf.add(tf.matmul(self.x, self.weights['w1']), self.weights['b1']))
         self.reconstruction = tf.add(tf.matmul(self.hidden, self.weights['w2']), self.weights['b2'])
         
-        self.cost = 0.5 * tf.reduce_sum(tf.pow(tf.subtract(self.reconstruction, self.x), 2.0))
+        self.cost = 0.5 * tf.reduce_sum(tf.pow(tf.subtract(self.reconstruction, self.y), 2.0))
         self.optimizer = optimizer.minimize(self.cost)
         
         
@@ -75,11 +80,11 @@ class Autoencoder(object):
         all_weights['b2'] = tf.Variable(tf.zeros([self.n_input],dtype = tf.float32))
         return all_weights
     
-    def partial_fit(self, X):
-        cost, opt = self.sess.run((self.cost, self.optimizer), feed_dict = {self.x: X})
+    def partial_fit(self, X, Y):
+        cost, opt = self.sess.run((self.cost, self.optimizer), feed_dict = {self.x: X, self.y: Y})
         return cost
 
-    def calc_total_cost(self, X):
+    def calc_total_cost(self, X, Y):
         return self.sess.run(self.cost, feed_dict = {self.x: X})
         
     def transform(self, X):
@@ -99,9 +104,25 @@ class Autoencoder(object):
     def getBiases(self):
         return self.sess.run(self.weights['b1'])
 
-training_epochs = 20
-auto = Autoencoder(n_input=32*32, n_hidden=20)
+training_epochs = 2000
+display_step = 100
+auto = Autoencoder(n_input=4*half_block*half_block, n_hidden=30)
+data = np.reshape(block, [num_block, -1])
+truth = np.reshape(block_gt, [num_block, -1])
     
 for epoch in range(training_epochs):
-    cost = auto
+    cost = auto.partial_fit(data, data)
+    if epoch % display_step == 0:
+        print("Epoch:", '%03d' % (epoch + 1), "cost=", "{:.4f}".format(cost))
+
+test_num = 11
+test_show = block[test_num, :, :] * pixel_depth
+test_data = np.reshape(block[test_num, :, :], [1, -1])
+    
+y = auto.reconstruct(test_data)
+y = np.reshape(y, [2*half_block,2*half_block])
+y = y * pixel_depth
+
+display(Image.fromarray(test_show.astype(np.uint8)))
+display(Image.fromarray(y.astype(np.uint8)))
     
