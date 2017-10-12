@@ -9,9 +9,14 @@ import numpy as np
 import tensorflow as tf
 from matplotlib import pyplot as plt
 import time
+import os
+import cv2
+from IPython.display import display
+from PIL import Image
 
 ## 读取数据
-pickle_file = 'cracks.pickle'
+path = "G:\Crack Detection\project\database\pydatabase"
+pickle_file = os.path.join(path, 'cracks.pickle')
 
 with open(pickle_file, 'rb') as f:
   save = pickle.load(f)
@@ -46,9 +51,9 @@ def accuracy(predictions, labels):
     return (100.0 * np.sum(np.argmax(predictions, 1) == np.argmax(labels, 1))
           / predictions.shape[0])
 
-batch_size = 128
+batch_size = 32
 patch_size = 3
-depth = 128
+depth = 32
 num_hidden = 32
 
 graph = tf.Graph()
@@ -171,7 +176,7 @@ with graph.as_default():
 
   # Training computation.
   logits = model(tf_train_dataset)
-  beta = 0.005
+  beta = 0.001
   l2_loss =  tf.nn.l2_loss(tf.concat(
           [tf.reshape(conv1_1_kernel, [-1]), tf.reshape(conv1_2_kernel, [-1]), 
            tf.reshape(conv2_1_kernel, [-1]), tf.reshape(conv2_2_kernel, [-1]),
@@ -187,15 +192,19 @@ with graph.as_default():
   valid_prediction = tf.nn.softmax(model_test(tf_valid_dataset))
   test_prediction = tf.nn.softmax(model_test(tf_test_dataset))
   
+#  predict = tf.nn.softmax(model_test(data))
   predict = tf.argmax(tf.nn.softmax(model_test(data)), -1)
   
   ## 保存模型，生成saver
   tf.add_to_collection('predict', predict)
   saver = tf.train.Saver(max_to_keep=1)
   
-num_steps = 10001
+num_steps = 7001
 train_accuracy = [0.0]
 valid_accuracy = [0.0]
+
+width = 320
+height = 480
 
 with tf.Session(graph=graph) as session:
     tf.global_variables_initializer().run()
@@ -216,9 +225,34 @@ with tf.Session(graph=graph) as session:
             print('Minibatch loss at step %d: %f' % (step, l))
             print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
             print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_labels))
-    saver.save(session, ".\CNN_cracks")
+    saver.save(session, "G:\Crack Detection\project\database\pydatabase\CNN_cracks")
     train_plot = tf.constant(train_accuracy).eval()
     valid_plot = tf.constant(valid_accuracy).eval()
+    
+    
+    # 单个样本验证
+    sample = "G:\Crack Detection\project\database\pydatabase\image/001.jpg"
+    x = 0
+    y = 0
+    block_size = image_size
+    slide = 15
+    pixel_depth = 255.0
+    pic = cv2.imread(sample)
+    img_pos = pic.copy()
+    pic = (pic - pixel_depth / 2) / pixel_depth
+    while x + block_size < width:
+        while y + block_size < height:
+            block_ = pic[x:x+block_size, y:y+block_size, :]
+            block = np.reshape(block_, [1, block_size, block_size, 3])
+            prediction = session.run(predict, feed_dict={data: block})
+            if prediction == 1:
+                img_pos[x:x+block_size, y:y+block_size, :] = 0
+            y += slide
+        x += slide
+        y = 0
+    result = Image.fromarray(img_pos.astype(np.uint8))
+    display(result)
+    
     plotx = np.arange(0, num_steps, 100)
     plt.plot(plotx, 100 - train_plot[1:], color="#348ABD", label="training")
     plt.plot(plotx, 100 - valid_plot[1:], color="#A60628", label="validation")
@@ -226,7 +260,7 @@ with tf.Session(graph=graph) as session:
     plt.xlabel("Training steps")
     plt.ylabel("Error rate")
     plt.title("Learning curve")
-    saver.restore(session, ".\CNN_cracks")
+#    saver.restore(session, "G:\Crack Detection\project\database\pydatabase\CNN_cracks")
     print(time.time() - start_time)
 #    print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_labels))
     
