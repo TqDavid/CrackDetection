@@ -19,7 +19,7 @@ from IPython.display import display
 from PIL import Image
 #from scipy import ndimage
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
 from matplotlib import pyplot as plt
 
 # In[0]: load images as train, validation and test dataset
@@ -41,11 +41,11 @@ half_block = image_size // 2
 pixel_depth = 255.0
 num_labels = 2
 
-batch_size = 128
+batch_size = 256
 patch_size = 3
-depth_1 = 64
-depth_2 = 64
-num_hidden = 256
+depth_1 = 8
+depth_2 = 16
+num_hidden = 32
 
 # In[1]: depart
     
@@ -68,6 +68,8 @@ def depart(image_folder):
     GT_folder = image_folder + '_GT'
     datapos = list()
     dataneg = list()
+    label_pos = list()
+    label_neg = list()
     image_files = os.listdir(image_folder)
     num_images = 0
     pos_block = 0
@@ -87,27 +89,24 @@ def depart(image_folder):
         image_pad = np.zeros([image_width+image_size-1, image_height+image_size-1, 3])
         for i in range(3):
             image_pad[:, :, i] = np.pad(image_data[:, :, i], half_block, 'constant', constant_values=0)
-        for x in range(0, image_width, 3):
-            for y in range(0, image_height, 3):
+        for x in range(0, image_width, 2):
+            for y in range(0, image_height, 2):
                 if label_data[x, y] != 0:
                     block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]  
-#                    b_show = Image.fromarray(block.astype(np.uint8))
                     block = (block - pixel_depth / 2) / pixel_depth
                     datapos.append(block)
+                    label_pos.append(1)
                     pos_block += 1
                     
-        for x in range(0, image_width, 8):
-            for y in range(0, image_height, 8):
-                if label_data[x, y] == 0 and neg_block < 2*pos_block:
+        for x in range(half_block // 2, image_width, 4):
+            for y in range(half_block // 2, image_height, 4):
+                if label_data[x, y] == 0 and neg_block < 16*pos_block:
                     block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
-#                    b_show = Image.fromarray(block.astype(np.uint8))
                     block = (block - pixel_depth / 2) / pixel_depth
                     dataneg.append(block)
+                    label_neg.append(0)
                     neg_block += 1
-    label_pos = list(np.ones(len(datapos)))
-    label_neg = list(np.zeros(len(dataneg)))
     label = label_pos + label_neg
-    label = [int(i) for i in label]
     dataset = datapos + dataneg
     del datapos, dataneg
     dataset1 = np.array(dataset)
@@ -132,6 +131,8 @@ def accuracy(predictions, labels):
 
 # In[2]: model   
 
+valid_batch_size = valid_label.shape[0] // 10
+test_batch_size = test_label.shape[0] // 10
 graph = tf.Graph()
 
 with graph.as_default():
@@ -140,8 +141,10 @@ with graph.as_default():
     tf_train_dataset = tf.placeholder(
             tf.float32, shape=(batch_size, image_size, image_size, num_channels))
     tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
-    tf_valid_dataset = tf.constant(valid_dataset, dtype=tf.float32)
-    tf_test_dataset = tf.constant(test_dataset, dtype=tf.float32)
+    tf_valid_dataset = tf.placeholder(
+            tf.float32, shape=(valid_batch_size, image_size, image_size, num_channels))
+    tf_test_dataset = tf.placeholder(
+            tf.float32, shape=(test_batch_size, image_size, image_size, num_channels))
     
     # 定义用于测试用的变量，并加入存储
     data = tf.placeholder(tf.float32, shape=(1, image_size, image_size, num_channels))
@@ -149,7 +152,7 @@ with graph.as_default():
   
     # Variables，训练参数
     # 第一卷积层
-    conv1_1_kernel = tf.Variable(tf.truncated_normal([4, 4, num_channels, depth_1], stddev=0.1))
+    conv1_1_kernel = tf.Variable(tf.truncated_normal([patch_size, patch_size, num_channels, depth_1], stddev=0.1))
     conv1_1_biases = tf.Variable(tf.zeros([depth_1]))
     conv1_2_kernel = tf.Variable(tf.truncated_normal([patch_size, patch_size, depth_1, depth_1], stddev=0.1))
     conv1_2_biases = tf.Variable(tf.zeros([depth_1]))
@@ -196,12 +199,12 @@ with graph.as_default():
             shape = conv2.get_shape().as_list()
             reshape = tf.reshape(conv2, [shape[0], shape[1] * shape[2] * shape[3]])
             drop3 = tf.nn.relu(tf.matmul(reshape, fc3_weights) + fc3_biases)
-            fc3 = tf.nn.dropout(drop3, 0.5, name=scope)
+            fc3 = tf.nn.dropout(drop3, 1, name=scope)
             print_activations(fc3)
         # 第四层全连接层
         with tf.name_scope('fc4') as scope:
             drop4 = tf.nn.relu(tf.matmul(fc3, fc4_weights) + fc4_biases)
-            fc4 = tf.nn.dropout(drop4, 0.5, name=scope)
+            fc4 = tf.nn.dropout(drop4, 1, name=scope)
             print_activations(fc4)
         # 第五层全连接层
         with tf.name_scope('fc5') as scope:
@@ -240,12 +243,12 @@ with graph.as_default():
 
     # Training computation.
     logits = model(tf_train_dataset)
-    beta = 0.0005
+    beta = 0.0001
     l2_loss =  tf.nn.l2_loss(tf.concat(
           [tf.reshape(conv1_1_kernel, [-1]), tf.reshape(conv1_2_kernel, [-1]), 
            tf.reshape(conv2_1_kernel, [-1]), tf.reshape(conv2_2_kernel, [-1]),
            tf.reshape(fc3_weights, [-1]), tf.reshape(fc4_weights, [-1]), tf.reshape(fc5_weights, [-1])], 0))
-    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tf_train_labels, logits=logits)) + beta * l2_loss
+    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf_train_labels, logits=logits)) + beta * l2_loss
     
     # Optimizer.
     optimizer = tf.train.AdadeltaOptimizer(1).minimize(loss)
@@ -263,7 +266,7 @@ with graph.as_default():
     saver = tf.train.Saver(max_to_keep=1)
 
 # In[2]:training and test  
-num_steps = 2001
+num_steps = 20001
 train_accuracy = [0.0]
 valid_accuracy = [0.0]
 
@@ -277,18 +280,24 @@ with tf.Session(graph=graph) as session:
     for step in range(num_steps):
         offset = (step * batch_size) % (train_label.shape[0] - batch_size)
         batch_data = train_dataset[offset:(offset + batch_size), :, :, :]
-        batch_labels = train_label[offset:(offset + batch_size)]
+        batch_labels = train_label[offset:(offset + batch_size), :]
         feed_dict = {tf_train_dataset : batch_data, tf_train_labels : batch_labels}
         _, l, predictions = session.run(
           [optimizer, loss, train_prediction], feed_dict=feed_dict)
         if (step % 100 == 0):
             accuracy1 = accuracy(predictions, batch_labels)
-            accuracy2 = accuracy(valid_prediction.eval(), valid_label)
-            train_accuracy.append(accuracy(predictions, batch_labels))
-            valid_accuracy.append(accuracy(valid_prediction.eval(), valid_label))
+            accuracy_temp = list()
+            for num in range(10):
+                valid_batch_data = valid_dataset[num*valid_batch_size : (num+1)*valid_batch_size, :, :, :]
+                valid_batch_label = valid_label[num*valid_batch_size : (num+1)*valid_batch_size, :]
+                predict_temp = session.run(valid_prediction, feed_dict = {tf_valid_dataset: valid_batch_data})
+                accuracy_temp.append(accuracy(predict_temp, valid_batch_label))
+            accuracy2 = np.mean(np.array(accuracy_temp))
+            train_accuracy.append(accuracy1)
+            valid_accuracy.append(accuracy2)
             print('Minibatch loss at step %d: %f' % (step, l))
-            print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
-            print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_label))
+            print('Minibatch accuracy: %.1f%%' % accuracy1)
+            print('Validation accuracy: %.1f%%' % accuracy2)
     saver.save(session, os.path.join(path, "CNN_cracks"))
     train_plot = tf.constant(train_accuracy).eval()
     valid_plot = tf.constant(valid_accuracy).eval()
@@ -301,22 +310,28 @@ with tf.Session(graph=graph) as session:
     plt.ylabel("Error rate")
     plt.title("Learning curve")
     print(time.time() - start_time)
-    print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_label))
+    for num in range(10):
+        test_batch_data = test_dataset[num*test_batch_size : (num+1)*test_batch_size, :, :, :]
+        test_batch_label = valid_label[num*test_batch_size : (num+1)*test_batch_size, :]
+        predict_temp = session.run(test_prediction, feed_dict = {tf_test_dataset: test_batch_data})
+        accuracy_temp.append(accuracy(predict_temp, test_batch_label))
+    accuracy3 = np.mean(np.array(accuracy_temp))
+    print('Test accuracy: %.1f%%' % accuracy3)
     
     # 单个样本验证
     saver.restore(session, os.path.join(path, "CNN_cracks"))
     x = 0
     y = 0
     block_size = image_size
-    pic_ = cv2.imread(sample)
+    pic = cv2.imread(sample)
     img = np.zeros([width, height])
-    pic = (pic_ - pixel_depth / 2) / pixel_depth
     pic_pad = np.zeros([width+image_size-1, height+image_size-1, 3])
     for i in range(3):
         pic_pad[:, :, i] = np.pad(pic[:, :, i], half_block, 'constant', constant_values=0)
-    for x in range(width):
-        for y in range(height):
+    for x in range(half_block, width - half_block + 1, 2):
+        for y in range(half_block, height - half_block + 1, 2):
             block = pic_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
+            block = (block - pixel_depth / 2) / pixel_depth
             block = np.reshape(block, [1, block_size, block_size, 3])
             prediction = session.run(predict, feed_dict={data: block})
             if prediction == 1:
@@ -332,9 +347,9 @@ with tf.Session(graph=graph) as session:
     precision = TP/(TP + FP)
     recall = TP/(TP + FN)
     F1 = 2 * precision * recall / (precision + recall)
-    print("precison = %.1f " % precision)
-    print("recall = %.1f" % recall)
-    print("F1 = %.1f " % F1)
+    print("precison = %.3f " % precision)
+    print("recall = %.3f" % recall)
+    print("F1 = %.3f " % F1)
 #    result = Image.fromarray(img.astype(np.uint8))
 #    display(result)
     

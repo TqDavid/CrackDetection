@@ -25,8 +25,8 @@ from matplotlib import pyplot as plt
 # In[0]: load images as train, validation and test dataset
 
 # 数据库路径
-path = 'G:/Crack Detection/project/database/pydatabase'
-sample = "G:/Crack Detection/project/database/pydatabase/image/2.jpg"
+path = 'G:\Crack Detection\project\database\pydatabase'
+sample = "G:/Crack Detection/project/database/pydatabase/train/1.jpg"
 #path = 'E:/project/database/pydatabase'
 #sample = "E:/project/database/pydatabase/image/001.jpg"
 #path = '../pydatabase'
@@ -46,6 +46,8 @@ patch_size = 3
 depth_1 = 64
 depth_2 = 64
 num_hidden = 256
+bigX = list()
+flag = 0
 
 # In[1]: depart
     
@@ -65,6 +67,7 @@ def reformat(dataset, labels):
 
 # 分离样本
 def depart(image_folder):
+    global bigX, bigY, flag
     GT_folder = image_folder + '_GT'
     datapos = list()
     dataneg = list()
@@ -78,12 +81,16 @@ def depart(image_folder):
         label_file = os.path.join(GT_folder, GT)
         try:
             image_data = cv2.imread(image_file)
-            label_data = cv2.cvtColor(cv2.imread(label_file), cv2.COLOR_BGR2GRAY) / 255
+            label_data = cv2.imread(label_file)
+#            display(Image.fromarray(image_data.astype(np.uint8)))
+#            display(Image.fromarray(label_data.astype(np.uint8)))
+            label_data = cv2.cvtColor(cv2.imread(label_file), cv2.COLOR_BGR2GRAY)# / 255
             if image_data.shape != (image_width, image_height, num_channels):
                 raise Exception('Unexpected image shape: %s' % str(image_data.shape))
             num_images = num_images + 1
         except IOError as e:
             print('Could not read:', image_file, ':', e)
+        label_pad = np.pad(label_data, half_block, 'constant', constant_values=0)
         image_pad = np.zeros([image_width+image_size-1, image_height+image_size-1, 3])
         for i in range(3):
             image_pad[:, :, i] = np.pad(image_data[:, :, i], half_block, 'constant', constant_values=0)
@@ -91,18 +98,27 @@ def depart(image_folder):
             for y in range(0, image_height, 16):
                 if label_data[x, y] != 0:
                     block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]  
-                    Image.fromarray(block.astype(np.uint8)).save(path + '/example/pos/' + str(pos_block) +'.jpg')
+                    display(Image.fromarray(block.astype(np.uint8)))
+                    label = label_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1]
+                    display(Image.fromarray(label.astype(np.uint8)))
                     block = (block - pixel_depth / 2) / pixel_depth
                     datapos.append(block)
                     pos_block += 1
-        for x in range(0, image_width, 64):
-            for y in range(0, image_height, 64):
+        for x in range(half_block, image_width, 32):
+            for y in range(half_block, image_height, 32):
                 if label_data[x, y] == 0 and neg_block < 2*pos_block:
                     block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
-                    Image.fromarray(block.astype(np.uint8)).save(path + '/example/neg/' + str(neg_block) +'.jpg')
+#                    display(Image.fromarray(block.astype(np.uint8)))
+#                    label = label_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1]
+#                    display(Image.fromarray(label.astype(np.uint8)))
                     block = (block - pixel_depth / 2) / pixel_depth
                     dataneg.append(block)
                     neg_block += 1
+                    if flag < 1:
+                        bigX.append([x,y])
+#                        block = block * pixel_depth + pixel_depth / 2
+#                        display(Image.fromarray(block.astype(np.uint8)))
+#                        flag += 1
     label_pos = list(np.ones(len(datapos)))
     label_neg = list(np.zeros(len(dataneg)))
     label = label_pos + label_neg
@@ -115,10 +131,11 @@ def depart(image_folder):
     dataset3, label3 = reformat(dataset2, label2)
     print("data positive: %d" % pos_block)
     print("data negative: %d" % neg_block)
+    flag += 1
     return dataset3, label3
 
-test_dataset, test_label = depart(os.path.join(path, 'test'))
-valid_dataset, valid_label = depart(os.path.join(path, 'validation'))
+#test_dataset, test_label = depart(os.path.join(path, 'test'))
+#valid_dataset, valid_label = depart(os.path.join(path, 'validation'))
 train_dataset, train_label = depart(os.path.join(path, 'train'))
 
 print('Training set', train_dataset.shape, train_label.shape)
@@ -250,19 +267,19 @@ with graph.as_default():
     optimizer = tf.train.AdadeltaOptimizer(1).minimize(loss)
   
     # Predictions for the training, validation, and test data.
-    train_prediction = tf.nn.softmax(logits)
-    valid_prediction = tf.nn.softmax(model_test(tf_valid_dataset))
-    test_prediction = tf.nn.softmax(model_test(tf_test_dataset))
+    train_prediction = tf.nn.sigmoid(logits)
+    valid_prediction = tf.nn.sigmoid(model_test(tf_valid_dataset))
+    test_prediction = tf.nn.sigmoid(model_test(tf_test_dataset))
   
     #  predict = tf.nn.softmax(model_test(data))
-    predict = tf.argmax(tf.nn.softmax(model_test(data)), -1)
+    predict = tf.nn.sigmoid(model_test(data))
   
     ## 保存模型，生成saver
     tf.add_to_collection('predict', predict)
     saver = tf.train.Saver(max_to_keep=1)
 
 # In[2]:training and test  
-num_steps = 2001
+num_steps = 1001
 train_accuracy = [0.0]
 valid_accuracy = [0.0]
 
@@ -270,73 +287,99 @@ width = 320
 height = 480
 
 with tf.Session(graph=graph) as session:
-    tf.global_variables_initializer().run()
-    start_time = time.time()
-    print('Initialized')
-    for step in range(num_steps):
-        offset = (step * batch_size) % (train_label.shape[0] - batch_size)
-        batch_data = train_dataset[offset:(offset + batch_size), :, :, :]
-        batch_labels = train_label[offset:(offset + batch_size)]
-        feed_dict = {tf_train_dataset : batch_data, tf_train_labels : batch_labels}
-        _, l, predictions = session.run(
-          [optimizer, loss, train_prediction], feed_dict=feed_dict)
-        if (step % 100 == 0):
-            accuracy1 = accuracy(predictions, batch_labels)
-            accuracy2 = accuracy(valid_prediction.eval(), valid_label)
-            train_accuracy.append(accuracy(predictions, batch_labels))
-            valid_accuracy.append(accuracy(valid_prediction.eval(), valid_label))
-            print('Minibatch loss at step %d: %f' % (step, l))
-            print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
-            print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_label))
-    saver.save(session, os.path.join(path, "CNN_cracks"))
-    train_plot = tf.constant(train_accuracy).eval()
-    valid_plot = tf.constant(valid_accuracy).eval()
-    
-    plotx = np.arange(0, num_steps, 100)
-    plt.plot(plotx, 100 - train_plot[1:], color="#348ABD", label="training")
-    plt.plot(plotx, 100 - valid_plot[1:], color="#A60628", label="validation")
-    plt.legend()
-    plt.xlabel("Training steps")
-    plt.ylabel("Error rate")
-    plt.title("Learning curve")
-    print(time.time() - start_time)
-    print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_label))
+#    tf.global_variables_initializer().run()
+#    start_time = time.time()
+#    print('Initialized')
+#    for step in range(num_steps):
+#        offset = (step * batch_size) % (train_label.shape[0] - batch_size)
+#        batch_data = train_dataset[offset:(offset + batch_size), :, :, :]
+#        batch_labels = train_label[offset:(offset + batch_size)]
+#        feed_dict = {tf_train_dataset : batch_data, tf_train_labels : batch_labels}
+#        _, l, predictions = session.run(
+#          [optimizer, loss, train_prediction], feed_dict=feed_dict)
+#        if (step % 100 == 0):
+#            accuracy1 = accuracy(predictions, batch_labels)
+#            accuracy2 = accuracy(valid_prediction.eval(), valid_label)
+#            train_accuracy.append(accuracy(predictions, batch_labels))
+#            valid_accuracy.append(accuracy(valid_prediction.eval(), valid_label))
+#            print('Minibatch loss at step %d: %f' % (step, l))
+#            print('Minibatch accuracy: %.1f%%' % accuracy(predictions, batch_labels))
+#            print('Validation accuracy: %.1f%%' % accuracy(valid_prediction.eval(), valid_label))
+#    saver.save(session, os.path.join(path, "CNN_cracks"))
+#    train_plot = tf.constant(train_accuracy).eval()
+#    valid_plot = tf.constant(valid_accuracy).eval()
+#    
+#    plotx = np.arange(0, num_steps, 100)
+#    plt.plot(plotx, 100 - train_plot[1:], color="#348ABD", label="training")
+#    plt.plot(plotx, 100 - valid_plot[1:], color="#A60628", label="validation")
+#    plt.legend()
+#    plt.xlabel("Training steps")
+#    plt.ylabel("Error rate")
+#    plt.title("Learning curve")
+#    print(time.time() - start_time)
+#    print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_label))
     
     # 单个样本验证
     saver.restore(session, os.path.join(path, "CNN_cracks"))
     x = 0
     y = 0
     block_size = image_size
-    pic_ = cv2.imread(sample)
+    label = cv2.imread(path + '/groundtruth/1.png')
+    label = cv2.cvtColor(label, cv2.COLOR_RGB2GRAY)
+    pic = cv2.imread(sample)
     img = np.zeros([width, height])
-    pic = (pic_ - pixel_depth / 2) / pixel_depth
     pic_pad = np.zeros([width+image_size-1, height+image_size-1, 3])
+    label_pad = np.pad(label, half_block, 'constant', constant_values=0)
     for i in range(3):
         pic_pad[:, :, i] = np.pad(pic[:, :, i], half_block, 'constant', constant_values=0)
+#    display(Image.fromarray(pic.astype(np.uint8)))
+#    display(Image.fromarray(pic_pad.astype(np.uint8)))
     for x in range(width):
         for y in range(height):
-            block = pic_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
-            block = np.reshape(block, [1, block_size, block_size, 3])
-            prediction = session.run(predict, feed_dict={data: block})
-            if prediction == 1:
-                img[x,y] = 255
-    result = Image.fromarray(img.astype(np.uint8)).save('result.png')
-    label = cv2.imread(path + '/groundtruth/1.png')
-    label = cv2.cvtColor(label, cv2.COLOR_RGB2GRAY) // 255
-    result = img > 0
-    result = np.multiply(result, 1)
-    TP = np.sum(result & label)
-    FP = np.sum(result & (~label))
-    FN = np.sum((~result) & label)
-    precision = TP/(TP + FP)
-    recall = TP/(TP + FN)
-    F1 = 2 * precision * recall / (precision + recall)
-    print("precison = %.1f " % precision)
-    print("recall = %.1f" % recall)
-    print("F1 = %.1f " % F1)
+            if label[x,y] == 0:
+                block = pic_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
+                label_show = label_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1]
+#                display(Image.fromarray(block.astype(np.uint8)))
+#                display(Image.fromarray(label_show.astype(np.uint8)))
+                block = (block - pixel_depth / 2) / pixel_depth
+                block1 = np.reshape(block, [1, block_size, block_size, 3])
+                prediction = session.run(predict, feed_dict={data: block1})
+#                if x == bigX - 1 and y == bigY - 1 and prediction[0,1] > 0.9:
+#                    block_test = block * pixel_depth + pixel_depth / 2
+#                    display(Image.fromarray(block_test.astype(np.uint8)))
+#                    break
+#                elif x > bigX and y > bigY:
+#                    break
+                img[x,y] = 255 * prediction[0,1]
+#    result = Image.fromarray(img.astype(np.uint8)).save('result.png')
+#    result = img > 0
+#    result = np.multiply(result, 1)
+#    TP = np.sum(result & label)
+#    FP = np.sum(result & (~label))
+#    FN = np.sum((~result) & label)
+#    precision = TP/(TP + FP)
+#    recall = TP/(TP + FN)
+#    F1 = 2 * precision * recall / (precision + recall)
+#    print("precison = %.1f " % precision)
+#    print("recall = %.1f" % recall)
+#    print("F1 = %.1f " % F1)
 #    result = Image.fromarray(img.astype(np.uint8))
 #    display(result)
     
+    # 测试集验证
+#    for i in range(len(data_test)):
+#        block = data_test[i]
+#        bshow = block * pixel_depth + pixel_depth / 2
+#        display(Image.fromarray(bshow.astype(np.uint8)))
+#        block = np.reshape(block, [1, image_size, image_size, 3])
+#        prediction = session.run(predict, feed_dict={data: block})        
+#        print(prediction)
+#    temp = block_test[340] - data_test[1]
+#    block1 = block_test[340] * pixel_depth + pixel_depth / 2
+#    block2 = data_test[1] * pixel_depth + pixel_depth / 2
+#    display(Image.fromarray(block1.astype(np.uint8)))
+#    display(Image.fromarray(block2.astype(np.uint8)))
+        
 session.close()
 del session
 

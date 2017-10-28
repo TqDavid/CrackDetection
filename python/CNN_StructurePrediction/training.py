@@ -95,18 +95,20 @@ def depart(image_folder):
         for i in range(3):
             image_pad[:, :, i] = np.pad(image_data[:, :, i], half_block, 'constant', constant_values=0)
         for x in range(0, image_width, 16):
-            for y in range(0, image_height, 8):
+            for y in range(0, image_height, 16):
                 if label_data[x, y] != 0:
                     image_block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
+                    image_block = (image_block - pixel_depth / 2) / pixel_depth
                     label_block = label_pad[x:x + 2*half_struct + 1, y:y + 2*half_struct + 1]
                     datapos.append(image_block)
                     labelpos.append(np.reshape(label_block, -1))
                     pos_block += 1
                     
         for x in range(0, image_width, 16):
-            for y in range(0, image_height, 32):
-                if label_data[x, y] == 0 and neg_block < pos_block:
+            for y in range(0, image_height, 16):
+                if label_data[x, y] == 0 and neg_block < 2*pos_block:
                     image_block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
+                    image_block = (image_block - pixel_depth / 2) / pixel_depth
                     label_block = label_pad[x:x + 2*half_struct + 1, y:y + 2*half_struct + 1]                    
                     dataneg.append(image_block)
                     labelneg.append(np.reshape(label_block, -1))
@@ -118,10 +120,9 @@ def depart(image_folder):
     label1 = np.array(label)
     dataset2, label2 = randomize(dataset1, label1)
     dataset3, label3 = reformat(dataset2, label2)
-    dataset4 = (dataset3 - pixel_depth / 2) / pixel_depth
     print("data positive: %d" % pos_block)
     print("data negative: %d" % neg_block)
-    return dataset4, label3
+    return dataset3, label3
 
 test_dataset, test_label = depart(os.path.join(path, 'test'))
 valid_dataset, valid_label = depart(os.path.join(path, 'validation'))
@@ -308,12 +309,12 @@ with tf.Session(graph=graph) as session:
     plt.xlabel("Training steps")
     plt.ylabel("Error rate")
     plt.title("Learning curve")
-    saver.restore(session, os.path.join(path, "CNN_cracks"))
     print('training time: %d' % (time.time() - start_time))
     print('Test accuracy: %.1f%%' % accuracy(test_prediction.eval(), test_label))
     
     
     # 单个样本验证
+    saver.restore(session, os.path.join(path, "CNN_cracks"))
     x = 0
     y = 0
     block_size = image_size
@@ -331,8 +332,8 @@ with tf.Session(graph=graph) as session:
             block = np.reshape(block, [1, block_size, block_size, 3])
             prediction = session.run(predict, feed_dict={data: block})
             img_pad[x:x + 2*half_struct + 1, y:y + 2*half_struct + 1] += np.reshape(prediction, [struct, struct])
-    img = img_pad[half_block:width+half_block, half_block:height+half_block, :]
-    output = img / tf.reduce_max(img) * 255
+    img = img_pad[half_block:width+half_block, half_block:height+half_block]
+    output = img / np.nanmax(img) * 255
     result = Image.fromarray((output).astype(np.uint8))
     display(result)
         
