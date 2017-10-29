@@ -10,8 +10,7 @@ import numpy as np
 #from PIL import Image
 #from IPython.display import display
 
-#path = '../pydatabase'
-path = "G:/Crack Detection/project/database/pydatabase"
+path = '../pydatabase'
 image_path = path + '/localization_pixel/'
 label_path = path + '/groundtruth/'
 

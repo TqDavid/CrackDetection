@@ -89,8 +89,8 @@ def depart(image_folder):
         image_pad = np.zeros([image_width+image_size-1, image_height+image_size-1, 3])
         for i in range(3):
             image_pad[:, :, i] = np.pad(image_data[:, :, i], half_block, 'constant', constant_values=0)
-        for x in range(0, image_width, 2):
-            for y in range(0, image_height, 2):
+        for x in range(0, image_width, 3):
+            for y in range(0, image_height, 3):
                 if label_data[x, y] != 0:
                     block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]  
                     block = (block - pixel_depth / 2) / pixel_depth
@@ -147,7 +147,7 @@ with graph.as_default():
             tf.float32, shape=(test_batch_size, image_size, image_size, num_channels))
     
     # 定义用于测试用的变量，并加入存储
-    data = tf.placeholder(tf.float32, shape=(1, image_size, image_size, num_channels))
+    data = tf.placeholder(tf.float32, shape=(None, image_size, image_size, num_channels))
     tf.add_to_collection('data', data)
   
     # Variables，训练参数
@@ -197,7 +197,7 @@ with graph.as_default():
         # 第三层全连接层
         with tf.name_scope('fc3') as scope:
             shape = conv2.get_shape().as_list()
-            reshape = tf.reshape(conv2, [shape[0], shape[1] * shape[2] * shape[3]])
+            reshape = tf.reshape(conv2, [-1, shape[1] * shape[2] * shape[3]])
             drop3 = tf.nn.relu(tf.matmul(reshape, fc3_weights) + fc3_biases)
             fc3 = tf.nn.dropout(drop3, 1, name=scope)
             print_activations(fc3)
@@ -229,7 +229,7 @@ with graph.as_default():
         # 第三层全连接层
         with tf.name_scope('fc3') as scope:
             shape = conv2.get_shape().as_list()
-            reshape = tf.reshape(conv2, [shape[0], shape[1] * shape[2] * shape[3]])
+            reshape = tf.reshape(conv2, [-1, shape[1] * shape[2] * shape[3]])
             drop3 = tf.nn.relu(tf.matmul(reshape, fc3_weights) + fc3_biases)
             fc3 = tf.nn.dropout(drop3, 1, name=scope)
         # 第四层全连接层
@@ -258,8 +258,8 @@ with graph.as_default():
     valid_prediction = tf.nn.softmax(model_test(tf_valid_dataset))
     test_prediction = tf.nn.softmax(model_test(tf_test_dataset))
   
-    #  predict = tf.nn.softmax(model_test(data))
-    predict = tf.argmax(tf.nn.softmax(model_test(data)), -1)
+    predict_temp = tf.nn.softmax(model_test(data))
+    predict = tf.argmax(predict_temp, 1)
   
     ## 保存模型，生成saver
     tf.add_to_collection('predict', predict)
@@ -328,14 +328,14 @@ with tf.Session(graph=graph) as session:
     pic_pad = np.zeros([width+image_size-1, height+image_size-1, 3])
     for i in range(3):
         pic_pad[:, :, i] = np.pad(pic[:, :, i], half_block, 'constant', constant_values=0)
-    for x in range(half_block, width - half_block + 1, 2):
-        for y in range(half_block, height - half_block + 1, 2):
+    for x in range(half_block, width - half_block):
+        block_tensor = list()
+        for y in range(half_block, height - half_block):
             block = pic_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
-            block = (block - pixel_depth / 2) / pixel_depth
-            block = np.reshape(block, [1, block_size, block_size, 3])
-            prediction = session.run(predict, feed_dict={data: block})
-            if prediction == 1:
-                img[x,y] = 255
+            block_tensor.append(block)
+        block_tensor = np.array(block_tensor)
+        prediction = session.run(predict, feed_dict={data: block_tensor})
+        img[x, half_block:height - half_block] = prediction * 255
     result = Image.fromarray(img.astype(np.uint8)).save('result.png')
     label = cv2.imread(path + '/groundtruth/1.png')
     label = cv2.cvtColor(label, cv2.COLOR_RGB2GRAY) // 255

@@ -16,8 +16,8 @@ import cv2
 
 # In[1]: 初始化处理
 # 基本参数设置
-#path = '../pydatabase'
-path = "G:/Crack Detection/project/database/pydatabase"
+path = '../pydatabase'
+#path = "G:/Crack Detection/project/database/pydatabase"
 folder = os.path.join(path, 'image')
 block_size = 27
 pixel_depth = 255.0
@@ -41,7 +41,7 @@ with tf.Session(graph=graph) as session:
         sample =  str(num_pic) + '.jpg'
         sample = os.path.join(folder, sample)
         img = cv2.imread(sample)
-        pic = (img - pixel_depth / 2) / pixel_depth
+        pic = ((img - pixel_depth / 2) / pixel_depth).astype(np.float32)
         
         # 图片高度、宽度读取
         width = pic.shape[0]
@@ -57,12 +57,13 @@ with tf.Session(graph=graph) as session:
         for i in range(3):
             pic_pad[:, :, i] = np.pad(pic[:, :, i], half_block, 'constant', constant_values=0)
         for x in range(half_block, width - half_block):
+            block_tensor = list()
             for y in range(half_block, height - half_block):
                 block = pic_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
-                block = np.reshape(block, [1, block_size, block_size, 3])
-                prediction = session.run(predict, feed_dict={data: block})
-                if prediction == 1:
-                    output[x,y] = 255
+                block_tensor.append(block)
+            block_tensor = np.array(block_tensor)
+            prediction = session.run(predict, feed_dict={data: block_tensor})
+            output[x, half_block:height - half_block] = prediction * 255
         result = Image.fromarray(output.astype(np.uint8)).save(path + '/localization_pixel/' + str(num_pic)+ '.png')
 #       display(result)      
         print(time.time() - start)
