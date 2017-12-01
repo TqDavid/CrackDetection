@@ -89,8 +89,8 @@ def depart(image_folder):
         image_pad = np.zeros([image_width+image_size-1, image_height+image_size-1, 3])
         for i in range(3):
             image_pad[:, :, i] = np.pad(image_data[:, :, i], half_block, 'constant', constant_values=0)
-        for x in range(0, image_width, 3):
-            for y in range(0, image_height, 3):
+        for x in range(0, image_width, 2):
+            for y in range(0, image_height, 2):
                 if label_data[x, y] != 0:
                     block = image_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]  
                     block = (block - pixel_depth / 2) / pixel_depth
@@ -332,6 +332,7 @@ with tf.Session(graph=graph) as session:
         block_tensor = list()
         for y in range(half_block, height - half_block):
             block = pic_pad[x:x + 2*half_block + 1, y:y + 2*half_block + 1, :]
+            block = (block - pixel_depth / 2) / pixel_depth
             block_tensor.append(block)
         block_tensor = np.array(block_tensor)
         prediction = session.run(predict, feed_dict={data: block_tensor})
